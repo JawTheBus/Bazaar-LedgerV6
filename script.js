@@ -440,20 +440,76 @@ document.getElementById('importInput').addEventListener('change', async e => {
 
 /* ---------------- Favoris ---------------- */
 
+// Compatibilité : d'anciens favoris peuvent être de simples chaînes ("Nom")
+// ou d'anciens objets { name, alert } (seuil d'achat uniquement).
+// On les normalise en { name, buyAlert, sellAlert }.
+function normalizeFavorite(f){
+  if(typeof f === 'string') return { name: f, buyAlert: null, sellAlert: null };
+  const buyAlert = typeof f.buyAlert === 'number' ? f.buyAlert : (typeof f.alert === 'number' ? f.alert : null);
+  const sellAlert = typeof f.sellAlert === 'number' ? f.sellAlert : null;
+  return { name: f.name, buyAlert, sellAlert };
+}
+
+// Icône d'item : tentative via les textures Minecraft vanilla (GitHub, gratuit,
+// sans clé). Ça fonctionne pour les items basés sur du vanilla (blocs, lingots,
+// minerais...) mais pas pour les items 100% custom à Skyblock (ex: Kuudra Teeth) —
+// dans ce cas l'image échoue simplement et on affiche un petit 📦 à la place.
+const TEXTURE_BASE = 'https://raw.githubusercontent.com/InventivetalentDev/minecraft-assets/1.21.1/assets/minecraft/textures';
+function guessTextureName(itemId){
+  return itemId.replace(/^ENCHANTED_/, '').toLowerCase();
+}
+function favIconHtml(itemId){
+  const guess = guessTextureName(itemId);
+  return `<img class="fav-icon" src="${TEXTURE_BASE}/block/${guess}.png"
+    data-fallback="${TEXTURE_BASE}/item/${guess}.png"
+    onerror="faviconFallback(this)">`;
+}
+function faviconFallback(img){
+  if(img.dataset.fallback){
+    const next = img.dataset.fallback;
+    img.dataset.fallback = '';
+    img.src = next;
+  } else {
+    img.replaceWith(Object.assign(document.createElement('span'), {className: 'fav-icon fav-icon-generic', textContent: '📦'}));
+  }
+}
+window.faviconFallback = faviconFallback;
+
 function renderFavorites(){
   const list = document.getElementById('favList');
   const empty = document.getElementById('favEmpty');
   list.innerHTML = '';
   empty.style.display = favorites.length ? 'none' : 'block';
 
-  favorites.forEach(name => {
-    const match = bazaarMap[name.toLowerCase()];
+  favorites.forEach(fRaw => {
+    const f = normalizeFavorite(fRaw);
+    const match = bazaarMap[f.name.toLowerCase()];
+    const buyPrice = match ? match.buy : null;
+    const sellPrice = match ? match.sell : null;
+    const buyHit = f.buyAlert !== null && buyPrice !== null && buyPrice <= f.buyAlert;
+    const sellHit = f.sellAlert !== null && sellPrice !== null && sellPrice >= f.sellAlert;
+    const itemId = match ? match.id : f.name.replace(/ /g, '_').toUpperCase();
+
     const row = document.createElement('div');
     row.className = 'fav-item';
     row.innerHTML = `
-      <span class="fav-name">${name}</span>
-      <span class="fav-prices">${match ? fmtNum(match.buy) : '…'}</span>
-      <button class="fav-remove" data-fav-remove="${name}">×</button>
+      <div class="fav-top">
+        ${favIconHtml(itemId)}
+        <span class="fav-name">${f.name}</span>
+        <button class="fav-remove" data-fav-remove="${f.name}">×</button>
+      </div>
+      <div class="fav-line ${buyHit ? 'fav-hit-buy' : ''}">
+        <span>${buyHit ? '▼ ' : ''}Buy Order ${buyPrice !== null ? fmtNum(buyPrice) : '…'}</span>
+        <span class="fav-alert-label" data-fav-alert="${f.name}" data-fav-alert-type="buy" title="Alerte à l'achat (vert si en dessous)">
+          ${f.buyAlert !== null ? '🔔 ' + fmtNum(f.buyAlert) : '🔔'}
+        </span>
+      </div>
+      <div class="fav-line ${sellHit ? 'fav-hit-sell' : ''}">
+        <span>${sellHit ? '▲ ' : ''}Sell Order ${sellPrice !== null ? fmtNum(sellPrice) : '…'}</span>
+        <span class="fav-alert-label" data-fav-alert="${f.name}" data-fav-alert-type="sell" title="Alerte à la vente (rouge si au dessus)">
+          ${f.sellAlert !== null ? '🔔 ' + fmtNum(f.sellAlert) : '🔔'}
+        </span>
+      </div>
     `;
     list.appendChild(row);
   });
@@ -462,12 +518,40 @@ function renderFavorites(){
 async function addFavorite(name){
   name = name.trim();
   if(!name || !currentProfile) return;
-  if(!favorites.find(f => f.toLowerCase() === name.toLowerCase())){
-    favorites.push(name);
+  favorites = favorites.map(normalizeFavorite);
+  if(!favorites.find(f => f.name.toLowerCase() === name.toLowerCase())){
+    favorites.push({ name, buyAlert: null, sellAlert: null });
     await saveProfileData();
     renderFavorites();
   }
   document.getElementById('favInput').value = '';
+}
+
+async function setFavoriteAlert(name, type){
+  favorites = favorites.map(normalizeFavorite);
+  const fav = favorites.find(f => f.name === name);
+  if(!fav) return;
+
+  const field = type === 'sell' ? 'sellAlert' : 'buyAlert';
+  const label = type === 'sell' ? 'vente' : 'achat';
+  const hint = type === 'sell'
+    ? "prix au-dessus duquel c'est intéressant de vendre"
+    : "prix en dessous duquel c'est intéressant d'acheter";
+
+  const current = fav[field] !== null ? fav[field] : '';
+  const input = prompt(`Prix d'alerte à la ${label} pour "${name}" (${hint}) :\nLaisse vide pour retirer l'alerte.`, current);
+  if(input === null) return; // annulé
+
+  const trimmed = input.trim();
+  if(trimmed === ''){
+    fav[field] = null;
+  } else {
+    const val = parseFloat(trimmed.replace(',', '.'));
+    if(!(val > 0)){ alert('Entre un nombre valide.'); return; }
+    fav[field] = val;
+  }
+  await saveProfileData();
+  renderFavorites();
 }
 
 document.getElementById('favAddBtn').addEventListener('click', () => {
@@ -477,12 +561,19 @@ document.getElementById('favInput').addEventListener('keydown', e => {
   if(e.key === 'Enter') addFavorite(e.target.value);
 });
 document.getElementById('favList').addEventListener('click', async e => {
-  const btn = e.target.closest('button[data-fav-remove]');
-  if(!btn) return;
-  const name = btn.dataset.favRemove;
-  favorites = favorites.filter(f => f !== name);
-  await saveProfileData();
-  renderFavorites();
+  const removeBtn = e.target.closest('button[data-fav-remove]');
+  const alertLabel = e.target.closest('[data-fav-alert]');
+
+  if(removeBtn){
+    const name = removeBtn.dataset.favRemove;
+    favorites = favorites.map(normalizeFavorite).filter(f => f.name !== name);
+    await saveProfileData();
+    renderFavorites();
+    return;
+  }
+  if(alertLabel){
+    await setFavoriteAlert(alertLabel.dataset.favAlert, alertLabel.dataset.favAlertType);
+  }
 });
 
 /* ---------------- Prix bazaar ---------------- */
