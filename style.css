@@ -170,13 +170,27 @@
   }
   .fav-add button{padding:6px 9px;font-size:11px;}
   .fav-item{
-    display:flex;justify-content:space-between;align-items:baseline;gap:6px;
-    padding:6px 0;border-bottom:1px dashed rgba(255,255,255,.06);
+    padding:8px 0;border-bottom:1px dashed rgba(255,255,255,.06);
     font-size:11.5px;color:var(--muted);
   }
-  .fav-item:hover{color:var(--text);}
+  .fav-top{display:flex;align-items:center;gap:6px;margin-bottom:4px;}
+  .fav-icon{
+    width:18px;height:18px;object-fit:contain;image-rendering:pixelated;
+    flex-shrink:0;background:rgba(255,255,255,.04);border-radius:3px;
+  }
+  .fav-icon-generic{
+    display:inline-flex;align-items:center;justify-content:center;
+    font-size:11px;line-height:1;
+  }
   .fav-item .fav-name{font-weight:600;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .fav-item .fav-prices{font-size:10.5px;white-space:nowrap;}
+  .fav-line{display:flex;justify-content:space-between;align-items:center;font-size:10.5px;padding:1px 0;}
+  .fav-line.fav-hit-buy{color:var(--emerald);font-weight:700;}
+  .fav-line.fav-hit-sell{color:var(--red);font-weight:700;}
+  .fav-alert-label{
+    font-size:10px;white-space:nowrap;cursor:pointer;color:var(--muted);
+    padding:0 2px;border-radius:4px;transition:color .15s ease;
+  }
+  .fav-alert-label:hover{color:var(--gold);}
   .fav-item .fav-remove{
     opacity:0;background:none;border:none;color:var(--red);cursor:pointer;
     font-size:12px;padding:0 2px;transition:opacity .15s ease;
