@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bazaar Ledger — Suivi de flips Hypixel Skyblock</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="modal-overlay" id="profileModal">
+  <div class="modal">
+    <h3>Choisir un profil</h3>
+    <p class="sub">Chaque compte Minecraft a son propre suivi de gains/pertes.</p>
+    <div class="profile-list" id="profileList"></div>
+    <label for="newProfileInput">Nouveau compte Minecraft</label>
+    <div class="modal-new">
+      <input type="text" id="newProfileInput" placeholder="Pseudo Minecraft" autocomplete="off">
+      <button class="primary" id="createProfileBtn">Créer</button>
+    </div>
+    <button class="ghost modal-close" id="closeModalBtn" style="display:none;">Annuler</button>
+  </div>
+</div>
+
+<div class="page">
+
+  <header class="top">
+    <div>
+      <p class="brand-eyebrow">Hypixel Skyblock · Bazaar</p>
+      <h1 class="brand-title">Bazaar Ledger</h1>
+      <p class="brand-sub">Suivi manuel de tes flips — clôture totale ou partielle, tout part dans le solde.</p>
+    </div>
+    <div class="status-box" id="statusBox">
+      <div class="profile-chip" id="profileChip">
+        <img id="profileAvatar" src="" alt="">
+        <div>
+          <div class="profile-chip-name" id="profileName">—</div>
+          <div class="profile-chip-switch">Changer ▾</div>
+        </div>
+      </div>
+      <div class="purse-info bordered">
+        <div class="purse-label">Solde net total (tous profils)</div>
+        <div class="purse-amount zero small" id="totalPurseAmount">0</div>
+      </div>
+      <div class="purse-info">
+        <div class="purse-label">Solde net</div>
+        <div class="purse-amount zero" id="purseAmount">0</div>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <div>
+      <div class="grid">
+        <div class="panel">
+          <h2>Nouveau flip</h2>
+          <div class="field">
+            <label for="itemInput">Item</label>
+            <input type="text" id="itemInput" list="itemsList" placeholder="Ex : Enchanted Lapis Block" autocomplete="off">
+            <datalist id="itemsList"></datalist>
+            <div class="hint" id="itemHint">&nbsp;</div>
+          </div>
+          <div class="field">
+            <label for="buyPrice">Prix d'achat (unitaire)</label>
+            <input type="number" id="buyPrice" min="0" step="0.1" placeholder="Ex : 4.2">
+          </div>
+          <div class="field">
+            <label for="qty">Quantité achetée</label>
+            <input type="number" id="qty" min="1" step="1" placeholder="Ex : 5000">
+          </div>
+          <button class="primary" id="addTrade" style="width:100%;">Ajouter le trade</button>
+          <div class="hint" id="refreshHint">
+            Prix bazaar chargés à l'instant. <button class="ghost" id="refreshPrices" style="padding:2px 8px;font-size:11px;">Actualiser</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Vue d'ensemble</h2>
+          <div class="stats-row">
+            <div class="stat">
+              <div class="stat-label">Trades ouverts</div>
+              <div class="stat-value" id="statOpen">0</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Gains cumulés</div>
+              <div class="stat-value pos" id="statGains">+0</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Pertes cumulées</div>
+              <div class="stat-value neg" id="statLosses">-0</div>
+            </div>
+            <div class="stat">
+              <div class="stat-label">Trades clôturés</div>
+              <div class="stat-value" id="statClosed">0</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-bottom:20px;">
+        <div class="panel-top"><h2 style="margin:0;">Trades en cours</h2></div>
+        <table>
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Prix achat</th>
+              <th>Quantité</th>
+              <th>Total achat</th>
+              <th>Valeur latente</th>
+              <th>Ouvert le</th>
+              <th style="text-align:right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="tradesBody"></tbody>
+        </table>
+        <div class="empty" id="tradesEmpty">Aucun trade en cours. Ajoute ton premier flip ci-dessus.</div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-top"><h2 style="margin:0;">Historique</h2></div>
+        <table>
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Achat</th>
+              <th>Vente</th>
+              <th>Quantité</th>
+              <th>Résultat</th>
+              <th>Statut</th>
+              <th>Clôturé le</th>
+            </tr>
+          </thead>
+          <tbody id="historyBody"></tbody>
+        </table>
+        <div class="empty" id="historyEmpty">Aucun trade clôturé pour le moment.</div>
+      </div>
+
+      <div class="panel" id="savePanel" style="margin-bottom:20px;">
+        <div class="panel-top"><h2 style="margin:0;">Sauvegarde des données</h2></div>
+        <p class="hint" id="fileStatus" style="margin:0 0 12px;">Connexion à Supabase...</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button id="exportBtn">Exporter une copie (.txt)</button>
+          <button id="importBtn">Restaurer une sauvegarde</button>
+          <input type="file" id="importInput" accept=".txt,.json,application/json,text/plain" style="display:none;">
+        </div>
+      </div>
+
+      <p class="footer-note">
+        Les données de tous les profils sont sauvegardées automatiquement dans ta base Supabase, pas dans le navigateur.
+        <button class="ghost danger" id="resetAll">Réinitialiser ce profil</button>
+      </p>
+    </div>
+
+    <aside class="favorites">
+      <p class="favorites-title">Favoris</p>
+      <div class="fav-add">
+        <input type="text" id="favInput" list="itemsList" placeholder="Ajouter un item" autocomplete="off">
+        <button id="favAddBtn">+</button>
+      </div>
+      <div id="favList"></div>
+      <div class="fav-empty" id="favEmpty">Aucun favori. Ajoute les items que tu surveilles.</div>
+    </aside>
+  </div>
+
+</div>
+
+<script src="supabase-config.js"></script>
+<script src="script.js"></script>
+</body>
+</html>
