@@ -142,6 +142,8 @@
   .badge.cancelled{background:rgba(239,91,98,.14);color:var(--red);}
   .latent-pos{color:var(--emerald);font-weight:600;}
   .latent-neg{color:var(--red);font-weight:600;}
+  .queue-top{color:var(--emerald);font-weight:700;font-size:11.5px;white-space:nowrap;}
+  .queue-wait{color:var(--gold);font-weight:600;font-size:11.5px;white-space:nowrap;}
   .empty{color:var(--muted);font-size:12.5px;padding:18px 4px;text-align:center;}
 
   .panel-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;}
