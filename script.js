@@ -7,7 +7,6 @@ let editingRowOpen = false; // évite qu'une actualisation auto n'écrase une sa
 let trades = [];
 let history = [];
 let favorites = [];
-let buyOrders = [];
 let bazaarMap = {}; // displayName(lowercase) -> {id, buy, sell}
 
 const dataKey = name => name.toLowerCase();
@@ -119,17 +118,16 @@ async function pollStore(){
 /* ---------------- Profil courant ---------------- */
 
 function loadProfileData(){
-  if(!currentProfile){ trades = []; history = []; favorites = []; buyOrders = []; return; }
-  const raw = store.data[dataKey(currentProfile)] || {trades: [], history: [], favorites: [], buyOrders: []};
+  if(!currentProfile){ trades = []; history = []; favorites = []; return; }
+  const raw = store.data[dataKey(currentProfile)] || {trades: [], history: [], favorites: []};
   trades = raw.trades || [];
   history = raw.history || [];
   favorites = raw.favorites || [];
-  buyOrders = raw.buyOrders || [];
 }
 
 async function saveProfileData(){
   if(!currentProfile) return;
-  store.data[dataKey(currentProfile)] = {trades, history, favorites, buyOrders};
+  store.data[dataKey(currentProfile)] = {trades, history, favorites};
   await persist();
 }
 
@@ -256,7 +254,6 @@ function flashPurse(isGain){
 }
 
 function render(){
-  renderBuyOrders();
   const {net, gains, losses, closedCount} = computeTotals();
   const globalNet = computeGlobalNet();
 
@@ -350,179 +347,6 @@ async function addTrade(){
   document.getElementById('itemHint').innerHTML = '&nbsp;';
   itemInput.focus();
 }
-
-/* ---------------- Buy Orders en cours ---------------- */
-
-// Compare le prix de notre Buy Order au carnet d'ordres (buy_summary) de
-// l'API pour estimer sa position : Top 1 (meilleur prix), ou quantité totale
-// qui doit se vendre avant que notre ordre ait une chance d'être rempli.
-function computeQueueInfo(item, orderPrice){
-  const match = bazaarMap[item.toLowerCase()];
-  if(!match || !match.buyOrderBook || !match.buyOrderBook.length){
-    return { known: false };
-  }
-  const EPS = Math.max(0.01, orderPrice * 0.0005); // tolérance d'arrondi
-  let ahead = 0;
-  let sameLevelAmount = 0;
-
-  match.buyOrderBook.forEach(level => {
-    if(level.price > orderPrice + EPS){
-      ahead += level.amount;
-    } else if(Math.abs(level.price - orderPrice) <= EPS){
-      sameLevelAmount += level.amount;
-    }
-  });
-
-  return { known: true, ahead, sameLevelAmount, isTop: ahead === 0 };
-}
-
-function queueInfoLabel(item, orderPrice){
-  const info = computeQueueInfo(item, orderPrice);
-  if(!info.known) return '<span class="muted">—</span>';
-  if(info.isTop && info.sameLevelAmount === 0){
-    return '<span class="queue-top">🥇 Top 1</span>';
-  }
-  if(info.isTop && info.sameLevelAmount > 0){
-    return `<span class="queue-top">🥇 Meilleur prix</span><br><span class="muted" style="font-size:9.5px;">+ ${fmtNum(info.sameLevelAmount)} au même prix</span>`;
-  }
-  let label = `<span class="queue-wait">~${fmtNum(info.ahead)} devant vous</span>`;
-  if(info.sameLevelAmount > 0){
-    label += `<br><span class="muted" style="font-size:9.5px;">+ ${fmtNum(info.sameLevelAmount)} au même prix</span>`;
-  }
-  return label;
-}
-
-function renderBuyOrders(){
-  const body = document.getElementById('buyOrdersBody');
-  const empty = document.getElementById('buyOrdersEmpty');
-  if(!body) return; // sécurité si l'élément n'existe pas encore
-
-  body.innerHTML = '';
-  empty.style.display = buyOrders.length ? 'none' : 'block';
-
-  buyOrders.forEach(o => {
-    const tr = document.createElement('tr');
-    tr.dataset.id = o.id;
-    const match = bazaarMap[o.item.toLowerCase()];
-    const currentPrice = match ? match.buy : null;
-    const latent = currentPrice !== null ? (currentPrice - o.buyPrice) * o.qty : null;
-    const latentClass = latent === null ? 'muted' : (latent >= 0 ? 'latent-pos' : 'latent-neg');
-    const latentLabel = latent === null ? '—' : fmtCoins(latent);
-
-    tr.innerHTML = `
-      <td class="item-name">${o.item}</td>
-      <td>${fmtNum(o.buyPrice)}</td>
-      <td>${fmtNum(o.qty)}</td>
-      <td>${fmtNum(o.buyPrice * o.qty)}</td>
-      <td class="${latentClass}">${latentLabel}</td>
-      <td class="muted">${o.openedAt}</td>
-      <td>${queueInfoLabel(o.item, o.buyPrice)}</td>
-      <td>
-        <div class="row-actions" id="order-actions-${o.id}">
-          <button class="ok" data-order-action="stock" data-order-id="${o.id}">Mise en stock</button>
-          <button class="danger" data-order-action="unfilled" data-order-id="${o.id}">Non rempli</button>
-        </div>
-      </td>
-    `;
-    body.appendChild(tr);
-  });
-}
-
-function startStockIn(id){
-  editingRowOpen = true;
-  const o = buyOrders.find(x => x.id === id);
-  if(!o) return;
-  const cell = document.getElementById(`order-actions-${id}`);
-  cell.innerHTML = `
-    <div class="close-form">
-      <input type="number" step="1" min="1" max="${o.qty}" value="${o.qty}" placeholder="Qté reçue" id="stockQty-${id}">
-      <button class="ok" data-order-action="confirm-stock" data-order-id="${id}">Valider</button>
-      <button class="ghost" data-order-action="abort-stock" data-order-id="${id}">Retour</button>
-    </div>
-  `;
-  document.getElementById(`stockQty-${id}`).focus();
-}
-
-async function confirmStockIn(id){
-  const qtyInput = document.getElementById(`stockQty-${id}`);
-  const idx = buyOrders.findIndex(o => o.id === id);
-  if(idx === -1) return;
-  const o = buyOrders[idx];
-
-  let receivedQty = parseInt(qtyInput.value, 10);
-  if(!(receivedQty > 0)){ qtyInput.focus(); return; }
-  if(receivedQty > o.qty) receivedQty = o.qty;
-
-  trades.push({
-    id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
-    item: o.item, buyPrice: o.buyPrice, qty: receivedQty,
-    openedAt: o.openedAt
-  });
-
-  if(receivedQty >= o.qty){
-    buyOrders.splice(idx, 1); // Buy Order entièrement rempli
-  } else {
-    o.qty -= receivedQty; // le reste attend toujours d'être rempli
-  }
-
-  editingRowOpen = false;
-  await saveProfileData();
-  render();
-}
-
-async function markUnfilled(id){
-  const o = buyOrders.find(x => x.id === id);
-  if(!o) return;
-  if(!confirm(`Marquer le Buy Order "${o.item}" comme non rempli ? Il sera retiré de la liste et tes coins sont considérés comme récupérés (aucun impact sur le solde, puisque rien n'avait encore été dépensé).`)) return;
-
-  buyOrders = buyOrders.filter(x => x.id !== id);
-  await saveProfileData();
-  render();
-}
-
-document.getElementById('buyOrdersBody').addEventListener('click', e => {
-  const btn = e.target.closest('button[data-order-action]');
-  if(!btn) return;
-  const { orderAction, orderId } = btn.dataset;
-  if(orderAction === 'stock') startStockIn(orderId);
-  else if(orderAction === 'unfilled') markUnfilled(orderId);
-  else if(orderAction === 'confirm-stock') confirmStockIn(orderId);
-  else if(orderAction === 'abort-stock'){ editingRowOpen = false; render(); }
-});
-
-async function addBuyOrder(){
-  if(!currentProfile) return;
-  const itemInput = document.getElementById('boItemInput');
-  const priceInput = document.getElementById('boPriceInput');
-  const qtyInput = document.getElementById('boQtyInput');
-
-  const item = itemInput.value.trim();
-  const buyPrice = parseFloat(priceInput.value);
-  const qty = parseInt(qtyInput.value, 10);
-
-  if(!item){ itemInput.focus(); return; }
-  if(!(buyPrice > 0)){ priceInput.focus(); return; }
-  if(!(qty > 0)){ qtyInput.focus(); return; }
-
-  buyOrders.push({
-    id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
-    item, buyPrice, qty,
-    openedAt: nowLabel()
-  });
-
-  await saveProfileData();
-  render();
-
-  itemInput.value = '';
-  priceInput.value = '';
-  qtyInput.value = '';
-  itemInput.focus();
-}
-
-document.getElementById('addBuyOrder').addEventListener('click', addBuyOrder);
-[document.getElementById('boPriceInput'), document.getElementById('boQtyInput')].forEach(el => {
-  el.addEventListener('keydown', e => { if(e.key === 'Enter') addBuyOrder(); });
-});
 
 function startClose(id){
   editingRowOpen = true;
@@ -675,13 +499,13 @@ function renderFavorites(){
         <button class="fav-remove" data-fav-remove="${f.name}">×</button>
       </div>
       <div class="fav-line ${buyHit ? 'fav-hit-buy' : ''}">
-        <span>${buyHit ? '▼ ' : ''}Sell Order ${buyPrice !== null ? fmtNum(buyPrice) : '…'}</span>
+        <span>${buyHit ? '▼ ' : ''}Buy Order ${buyPrice !== null ? fmtNum(buyPrice) : '…'}</span>
         <span class="fav-alert-label" data-fav-alert="${f.name}" data-fav-alert-type="buy" title="Alerte à l'achat (vert si en dessous)">
           ${f.buyAlert !== null ? '🔔 ' + fmtNum(f.buyAlert) : '🔔'}
         </span>
       </div>
       <div class="fav-line ${sellHit ? 'fav-hit-sell' : ''}">
-        <span>${sellHit ? '▲ ' : ''}Buy Order ${sellPrice !== null ? fmtNum(sellPrice) : '…'}</span>
+        <span>${sellHit ? '▲ ' : ''}Sell Order ${sellPrice !== null ? fmtNum(sellPrice) : '…'}</span>
         <span class="fav-alert-label" data-fav-alert="${f.name}" data-fav-alert-type="sell" title="Alerte à la vente (rouge si au dessus)">
           ${f.sellAlert !== null ? '🔔 ' + fmtNum(f.sellAlert) : '🔔'}
         </span>
@@ -773,8 +597,7 @@ async function loadBazaar(){
       bazaarMap[name.toLowerCase()] = {
         id,
         buy: p.quick_status ? p.quick_status.buyPrice : 0,
-        sell: p.quick_status ? p.quick_status.sellPrice : 0,
-        buyOrderBook: Array.isArray(p.buy_summary) ? p.buy_summary : []
+        sell: p.quick_status ? p.quick_status.sellPrice : 0
       };
       const opt = document.createElement('option');
       opt.value = name;
@@ -785,7 +608,6 @@ async function loadBazaar(){
     hint.innerHTML = `Prix bazaar chargés à l'instant (${nowLabel()}). <button class="ghost" id="refreshPrices" style="padding:2px 8px;font-size:11px;">Actualiser</button>`;
     document.getElementById('refreshPrices').addEventListener('click', loadBazaar);
     render();
-    renderBuyOrders();
     renderFavorites();
   }catch(err){
     hint.innerHTML = `Impossible de charger les prix bazaar (hors-ligne ou API bloquée). L'ajout de trades reste possible manuellement. <button class="ghost" id="refreshPrices" style="padding:2px 8px;font-size:11px;">Réessayer</button>`;
