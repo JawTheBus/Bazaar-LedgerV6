@@ -326,7 +326,6 @@ async function addTrade(){
   const itemInput = document.getElementById('itemInput');
   const buyPriceInput = document.getElementById('buyPrice');
   const qtyInput = document.getElementById('qty');
-  const pendingCheckbox = document.getElementById('isPendingOrder');
 
   const item = itemInput.value.trim();
   const buyPrice = parseFloat(buyPriceInput.value);
@@ -336,19 +335,11 @@ async function addTrade(){
   if(!(buyPrice > 0)){ buyPriceInput.focus(); return; }
   if(!(qty > 0)){ qtyInput.focus(); return; }
 
-  if(pendingCheckbox.checked){
-    buyOrders.push({
-      id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
-      item, buyPrice, qty,
-      openedAt: nowLabel()
-    });
-  } else {
-    trades.push({
-      id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
-      item, buyPrice, qty,
-      openedAt: nowLabel()
-    });
-  }
+  trades.push({
+    id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+    item, buyPrice, qty,
+    openedAt: nowLabel()
+  });
 
   await saveProfileData();
   render();
@@ -356,7 +347,6 @@ async function addTrade(){
   itemInput.value = '';
   buyPriceInput.value = '';
   qtyInput.value = '';
-  pendingCheckbox.checked = false;
   document.getElementById('itemHint').innerHTML = '&nbsp;';
   itemInput.focus();
 }
@@ -428,9 +418,9 @@ function renderBuyOrders(){
       <td class="muted">${o.openedAt}</td>
       <td>${queueInfoLabel(o.item, o.buyPrice)}</td>
       <td>
-        <div class="row-actions">
-          <button class="ok" data-order-action="fill" data-order-id="${o.id}">Rempli → Trade</button>
-          <button class="danger" data-order-action="cancel" data-order-id="${o.id}">Annuler</button>
+        <div class="row-actions" id="order-actions-${o.id}">
+          <button class="ok" data-order-action="stock" data-order-id="${o.id}">Mise en stock</button>
+          <button class="danger" data-order-action="unfilled" data-order-id="${o.id}">Non rempli</button>
         </div>
       </td>
     `;
@@ -438,26 +428,52 @@ function renderBuyOrders(){
   });
 }
 
-async function fillBuyOrder(id){
+function startStockIn(id){
+  editingRowOpen = true;
+  const o = buyOrders.find(x => x.id === id);
+  if(!o) return;
+  const cell = document.getElementById(`order-actions-${id}`);
+  cell.innerHTML = `
+    <div class="close-form">
+      <input type="number" step="1" min="1" max="${o.qty}" value="${o.qty}" placeholder="Qté reçue" id="stockQty-${id}">
+      <button class="ok" data-order-action="confirm-stock" data-order-id="${id}">Valider</button>
+      <button class="ghost" data-order-action="abort-stock" data-order-id="${id}">Retour</button>
+    </div>
+  `;
+  document.getElementById(`stockQty-${id}`).focus();
+}
+
+async function confirmStockIn(id){
+  const qtyInput = document.getElementById(`stockQty-${id}`);
   const idx = buyOrders.findIndex(o => o.id === id);
   if(idx === -1) return;
   const o = buyOrders[idx];
 
+  let receivedQty = parseInt(qtyInput.value, 10);
+  if(!(receivedQty > 0)){ qtyInput.focus(); return; }
+  if(receivedQty > o.qty) receivedQty = o.qty;
+
   trades.push({
     id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
-    item: o.item, buyPrice: o.buyPrice, qty: o.qty,
+    item: o.item, buyPrice: o.buyPrice, qty: receivedQty,
     openedAt: o.openedAt
   });
-  buyOrders.splice(idx, 1);
 
+  if(receivedQty >= o.qty){
+    buyOrders.splice(idx, 1); // Buy Order entièrement rempli
+  } else {
+    o.qty -= receivedQty; // le reste attend toujours d'être rempli
+  }
+
+  editingRowOpen = false;
   await saveProfileData();
   render();
 }
 
-async function cancelBuyOrder(id){
+async function markUnfilled(id){
   const o = buyOrders.find(x => x.id === id);
   if(!o) return;
-  if(!confirm(`Annuler le Buy Order "${o.item}" ? Il sera simplement retiré (aucun coin n'a encore été dépensé).`)) return;
+  if(!confirm(`Marquer le Buy Order "${o.item}" comme non rempli ? Il sera retiré de la liste et tes coins sont considérés comme récupérés (aucun impact sur le solde, puisque rien n'avait encore été dépensé).`)) return;
 
   buyOrders = buyOrders.filter(x => x.id !== id);
   await saveProfileData();
@@ -468,8 +484,44 @@ document.getElementById('buyOrdersBody').addEventListener('click', e => {
   const btn = e.target.closest('button[data-order-action]');
   if(!btn) return;
   const { orderAction, orderId } = btn.dataset;
-  if(orderAction === 'fill') fillBuyOrder(orderId);
-  else if(orderAction === 'cancel') cancelBuyOrder(orderId);
+  if(orderAction === 'stock') startStockIn(orderId);
+  else if(orderAction === 'unfilled') markUnfilled(orderId);
+  else if(orderAction === 'confirm-stock') confirmStockIn(orderId);
+  else if(orderAction === 'abort-stock'){ editingRowOpen = false; render(); }
+});
+
+async function addBuyOrder(){
+  if(!currentProfile) return;
+  const itemInput = document.getElementById('boItemInput');
+  const priceInput = document.getElementById('boPriceInput');
+  const qtyInput = document.getElementById('boQtyInput');
+
+  const item = itemInput.value.trim();
+  const buyPrice = parseFloat(priceInput.value);
+  const qty = parseInt(qtyInput.value, 10);
+
+  if(!item){ itemInput.focus(); return; }
+  if(!(buyPrice > 0)){ priceInput.focus(); return; }
+  if(!(qty > 0)){ qtyInput.focus(); return; }
+
+  buyOrders.push({
+    id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+    item, buyPrice, qty,
+    openedAt: nowLabel()
+  });
+
+  await saveProfileData();
+  render();
+
+  itemInput.value = '';
+  priceInput.value = '';
+  qtyInput.value = '';
+  itemInput.focus();
+}
+
+document.getElementById('addBuyOrder').addEventListener('click', addBuyOrder);
+[document.getElementById('boPriceInput'), document.getElementById('boQtyInput')].forEach(el => {
+  el.addEventListener('keydown', e => { if(e.key === 'Enter') addBuyOrder(); });
 });
 
 function startClose(id){
